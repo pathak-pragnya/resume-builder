@@ -1,6 +1,7 @@
 import { html } from './html.js';
 
 const PATHS = {
+  grip: '<circle cx="8" cy="5" r="1"/><circle cx="16" cy="5" r="1"/><circle cx="8" cy="12" r="1"/><circle cx="16" cy="12" r="1"/><circle cx="8" cy="19" r="1"/><circle cx="16" cy="19" r="1"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
   'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
   'arrow-up': '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',

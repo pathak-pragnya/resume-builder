@@ -21,10 +21,9 @@ SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 DOMAIN_RE = re.compile(r"^(?:https?://)?(?:www\.)?[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}(?:/\S*)?$")
 INLINE_RE = re.compile(
-    r"\*\*(?P<bold>.+?)\*\*"
-    r"|\*(?P<italic>[^*\s](?:[^*]*[^*\s])?)\*"
-    r"|`(?P<code>[^`]+)`"
+    r"`(?P<code>[^`]+)`"
     r"|\[(?P<label>[^\]]+)\]\((?P<url>[^)\s]+)\)"
+    r"|\*{1,3}|__"
 )
 
 PAPER_SIZES = {
@@ -47,6 +46,8 @@ BULLET_SYMBOLS = {
 }
 
 SECTION_STYLE_SCHEMA = {
+    "headingColor": ("color",),
+    "ruleColor": ("color",),
     "spaceBefore": ("length",),
     "spaceAfter": ("length",),
     "contentIndent": ("length",),
@@ -54,6 +55,10 @@ SECTION_STYLE_SCHEMA = {
     "itemSep": ("length",),
     "listIndent": ("length",),
     "labelWidth": ("length",),
+    "skillColumnGap": ("length",),
+    "skillsLayout": ("enum", ("table", "inline")),
+    "labelBold": ("bool",),
+    "labelSuffix": ("string",),
     "rowGap": ("length",),
     "columnGap": ("length",),
     "extraSpaceAfter": ("length",),
@@ -78,6 +83,7 @@ SECTION_LENGTH_OVERRIDES = {
     "itemSep": "rbListItemSep",
     "listIndent": "rbListIndent",
     "labelWidth": "rbSkillLabelWidth",
+    "skillColumnGap": "rbSkillColGap",
     "rowGap": "rbSkillRowGap",
     "columnGap": "rbListColumnGap",
 }
@@ -217,12 +223,17 @@ def _normalize_style(raw: Any, schema: dict) -> dict:
         return style
     for key, spec in schema.items():
         value = raw.get(key)
-        if value is None or value == "":
+        if value is None or (value == "" and spec[0] != "string"):
             continue
         kind = spec[0]
         result = None
         if kind == "length":
             result = normalize_length(value)
+        elif kind == "color" and isinstance(value, str):
+            match = COLOR_RE.match(value)
+            result = "#" + match.group(1).upper() if match else None
+        elif kind == "string" and isinstance(value, str):
+            result = value
         elif kind == "bool":
             result = value if isinstance(value, bool) else None
         elif kind == "number" and not isinstance(value, bool):
@@ -250,6 +261,11 @@ def _normalize_entry(raw: Any) -> dict | None:
     return {
         "title": _str(raw.get("title")),
         "subtitle": _str(raw.get("subtitle")),
+        "degree": _str(raw.get("degree")),
+        "courses": _str(raw.get("courses")),
+        "company": _str(raw.get("company")),
+        "companyPosition": "alongside" if raw.get("companyPosition") == "alongside" else "below",
+        "groupId": _str(raw.get("groupId")),
         "date": _str(raw.get("date")),
         "location": _str(raw.get("location")),
         "url": _str(raw.get("url")),
@@ -271,8 +287,26 @@ def _normalize_section(raw: Any) -> dict | None:
         "style": _normalize_style(raw.get("style"), SECTION_STYLE_SCHEMA),
     }
     kind = raw["type"]
-    if kind == "entries":
+    if kind in ("entries", "education", "work"):
         section["entries"] = [e for e in map(_normalize_entry, _list(raw.get("entries"))) if e]
+        section["entryGroups"] = []
+        seen = set()
+        for group in _list(raw.get("entryGroups")):
+            if not isinstance(group, dict):
+                continue
+            group_id = _str(group.get("id"))
+            if not group_id or group_id in seen:
+                continue
+            seen.add(group_id)
+            section["entryGroups"].append({"id": group_id, "title": _str(group.get("title"))})
+        valid_order = [""] + [group["id"] for group in section["entryGroups"]]
+        order = []
+        for group_id in _list(raw.get("entryGroupOrder")):
+            if isinstance(group_id, str) and group_id in valid_order and group_id not in order:
+                order.append(group_id)
+        if "" not in order:
+            order.insert(0, "")
+        section["entryGroupOrder"] = order + [group_id for group_id in valid_order if group_id not in order]
     elif kind == "skills":
         section["rows"] = [
             {"label": _str(row.get("label")), "value": _str(row.get("value"))}
@@ -340,20 +374,47 @@ class _Writer:
         value = value.strip()
         if self.raw_text:
             return value
-        out, pos = [], 0
+        frames = [("", [])]
+        pos = 0
+
+        def close_format() -> None:
+            marker, parts = frames.pop()
+            command = {"**": r"\textbf", "*": r"\textit", "__": r"\uline"}[marker]
+            frames[-1][1].append(command + "{" + "".join(parts) + "}")
+
         for match in INLINE_RE.finditer(value):
-            out.append(escape(value[pos:match.start()]))
-            if match.group("bold") is not None:
-                out.append(r"\textbf{" + self.text(match.group("bold")) + "}")
-            elif match.group("italic") is not None:
-                out.append(r"\textit{" + self.text(match.group("italic")) + "}")
-            elif match.group("code") is not None:
-                out.append(r"\texttt{" + escape(match.group("code")) + "}")
+            frames[-1][1].append(escape(value[pos:match.start()]))
+            if match.group("code") is not None:
+                frames[-1][1].append(r"\texttt{" + escape(match.group("code")) + "}")
+            elif match.group("label") is not None:
+                frames[-1][1].append(self.href(normalize_url(match.group("url")), self.text(match.group("label"))))
             else:
-                out.append(self.href(normalize_url(match.group("url")), self.text(match.group("label"))))
+                marker = match.group(0)
+                if marker == "__":
+                    if frames[-1][0] == marker:
+                        close_format()
+                    else:
+                        frames.append((marker, []))
+                else:
+                    remaining = len(marker)
+                    while remaining:
+                        current = frames[-1][0]
+                        if current == "*" and remaining % 2:
+                            close_format()
+                            remaining -= 1
+                        elif current == "**" and remaining >= 2:
+                            close_format()
+                            remaining -= 2
+                        else:
+                            opening = "**" if remaining >= 2 else "*"
+                            frames.append((opening, []))
+                            remaining -= len(opening)
             pos = match.end()
-        out.append(escape(value[pos:]))
-        return "".join(out)
+        frames[-1][1].append(escape(value[pos:]))
+        while len(frames) > 1:
+            marker, parts = frames.pop()
+            frames[-1][1].append(escape(marker) + "".join(parts))
+        return "".join(frames[0][1])
 
     def paragraphs(self, value: str) -> str:
         blocks = [b for b in re.split(r"\n\s*\n", value.strip()) if b.strip()]
@@ -439,7 +500,7 @@ class _Writer:
         out += ["", "% ---------- Fonts ----------"]
         out += self.font_setup()
 
-        out += ["", "% ---------- Packages ----------", r"\usepackage{graphicx}", r"\usepackage{xcolor}"]
+        out += ["", "% ---------- Packages ----------", r"\usepackage{graphicx}", r"\usepackage{xcolor}", r"\usepackage[normalem]{ulem}"]
         if self.needs_microtype():
             if self.engine == "pdflatex":
                 flag = "true" if T["microtype"] else "false"
@@ -622,6 +683,7 @@ class _Writer:
             "% Entries",
             rf"\newcommand{{\rbTitle}}[1]{{{{{title_family}\rbTitleSize{bold if E['titleBold'] else ''}{italic if E['titleItalic'] else ''}#1}}}}",
             rf"\newcommand{{\rbSubtitle}}[1]{{{{\rbSubtitleSize{bold if E['subtitleBold'] else ''}{italic if E['subtitleItalic'] else ''}#1}}}}",
+            r"\newcommand{\rbCompany}[1]{{\normalfont\rbSubtitleSize\bfseries\upshape #1}}",
             rf"\newcommand{{\rbDate}}[1]{{{{\rbDateSize{bold if E['dateBold'] else ''}{italic if E['dateItalic'] else ''}\color{{rbMuted}}#1}}}}",
             rf"\newcommand{{\rbLocation}}[1]{{{{\rbDateSize{italic if E['locationItalic'] else ''}\color{{rbMuted}}#1}}}}",
             _tpl(
@@ -630,6 +692,7 @@ class _Writer:
             ),
             r"\newcommand{\rbEntryHead}[2]{\par{\rbEntryHeadSize\leavevmode#1\rbPushRight#2\par}}",
             r"\newcommand{\rbEntrySub}[2]{\par\nopagebreak\vspace{\rbEntryLineGap}{\rbEntrySubSize\leavevmode#1\rbPushRight#2\par}}",
+            r"\newcommand{\rbEntryGroup}[1]{\par{\rbHeadingFamily\rbSectionSize\bfseries\upshape\color{rbHeading}\leavevmode#1\par}\nopagebreak\vspace{\rbSectionSpaceAfter}\nopagebreak}",
             r"\newcommand{\rbEntryDesc}[1]{\par\nopagebreak\vspace{\rbEntryDescGap}{\leavevmode#1\par}}",
             r"\newcommand{\rbContentStart}{\leftskip=\rbContentIndent\relax}",
             "",
@@ -665,14 +728,18 @@ class _Writer:
             "% Skills rows",
             rf"\newcommand{{\rbSkillLabel}}[1]{{{{{bold if Sk['labelBold'] else ''}#1}}}}",
         ]
-        if Sk["layout"] == "table":
-            out.append(
-                r"\newcommand{\rbSkillRow}[2]{\par\hangindent=\dimexpr\rbSkillLabelWidth+\rbSkillColGap\relax"
-                r"\hangafter=1\noindent\makebox[\rbSkillLabelWidth][l]{\rbSkillLabel{#1}}\hspace{\rbSkillColGap}#2\par}"
-            )
-        else:
-            out.append(r"\newcommand{\rbSkillRow}[2]{\par\noindent\rbSkillLabel{#1}\hspace{\rbSkillColGap}#2\par}")
+        out.append(self.skill_row_macro(Sk["layout"]))
         return out
+
+    @staticmethod
+    def skill_row_macro(layout: str, renew: bool = False) -> str:
+        command = r"\renewcommand" if renew else r"\newcommand"
+        if layout == "table":
+            body = (r"\par\hangindent=\dimexpr\rbSkillLabelWidth+\rbSkillColGap\relax"
+                    r"\hangafter=1\noindent\makebox[\rbSkillLabelWidth][l]{\rbSkillLabel{#1}}\hspace{\rbSkillColGap}#2\par")
+        else:
+            body = r"\par\noindent\rbSkillLabel{#1}\hspace{\rbSkillColGap}#2\par"
+        return command + r"{\rbSkillRow}[2]{" + body + "}"
 
     @staticmethod
     def section_macro(S: dict) -> list[str]:
@@ -797,6 +864,11 @@ class _Writer:
         if style.get("pageBreakBefore"):
             out.append(r"\newpage")
         out.append(r"\begingroup")
+        if "headingColor" in style:
+            out.append(rf"\definecolor{{rbHeading}}{{HTML}}{{{style['headingColor'][1:]}}}% section override")
+            out.append(r"\colorlet{rbRule}{rbHeading}% match this section's separator to its heading")
+        if "ruleColor" in style:
+            out.append(rf"\definecolor{{rbRule}}{{HTML}}{{{style['ruleColor'][1:]}}}% section separator override")
         for key, length in SECTION_LENGTH_OVERRIDES.items():
             if key in style:
                 out.append(rf"\setlength{{\{length}}}{{{style[key]}}}% section override")
@@ -815,7 +887,7 @@ class _Writer:
         out.append(r"\rbContentStart")
 
         kind = section["type"]
-        if kind == "entries":
+        if kind in ("entries", "education", "work"):
             out += self.entries(section)
         elif kind == "skills":
             out += self.skills(section)
@@ -838,14 +910,31 @@ class _Writer:
         if not items:
             return []
         out = [r"\begin{rbBullets}"]
+        if any("__" in item for item in items):
+            out.append(r"\emergencystretch=3em% allow underlined words to wrap without overflowing")
         out += [rf"  \item {self.text(item)}" for item in items]
         out.append(r"\end{rbBullets}")
         return out
 
     def entries(self, section: dict) -> list[str]:
         out: list[str] = []
-        visible = [e for e in section["entries"] if not e["hidden"]]
-        for index, entry in enumerate(visible):
+        fields = ["title", "subtitle", "date", "location", "description"]
+        if section["type"] == "work":
+            fields.append("company")
+        elif section["type"] == "education":
+            fields += ["degree", "courses"]
+        visible = [e for e in section["entries"] if not e["hidden"] and (e["bullets"] or any(e[key].strip() for key in fields))]
+        groups = section.get("entryGroups", [])
+        known = {group["id"] for group in groups}
+        by_id = {group["id"]: group for group in groups}
+        ordered = []
+        for group_id in section["entryGroupOrder"]:
+            if not group_id:
+                ordered += [(None, entry) for entry in visible if entry["groupId"] not in known]
+            else:
+                ordered += [(by_id[group_id], entry) for entry in visible if entry["groupId"] == group_id]
+        previous_group = None
+        for index, (group, entry) in enumerate(ordered):
             style = entry["style"]
             if index:
                 out.append(r"\vspace{\rbEntryGap}")
@@ -853,6 +942,9 @@ class _Writer:
                 out.append(r"\newpage")
             if not is_zero_length(style.get("spaceBefore")):
                 out.append(rf"\vspace{{{style['spaceBefore']}}}% entry fine-tune")
+            if group and group["id"] != previous_group and group["title"].strip():
+                out.append(rf"\rbEntryGroup{{{self.text(group['title'])}}}")
+            previous_group = group["id"] if group else None
             grouped = "itemSep" in style
             if grouped:
                 out.append(rf"\begingroup\setlength{{\rbListItemSep}}{{{style['itemSep']}}}% entry override")
@@ -861,10 +953,31 @@ class _Writer:
             if entry["url"].strip() and title:
                 title = self.href(normalize_url(entry["url"]), title)
             subtitle = self.text(entry["subtitle"])
+            if section["type"] == "education":
+                degree = self.text(entry["degree"])
+                subtitle = r"\enspace\textperiodcentered\enspace{}".join(part for part in (degree, subtitle) if part)
             date = self.text(entry["date"])
             location = self.text(entry["location"])
 
-            if self.L["entry"]["layout"] == "oneLine":
+            if section["type"] == "work":
+                company = self.text(entry["company"])
+                company = rf"\rbCompany{{{company}}}" if company else ""
+                alongside = entry["companyPosition"] == "alongside"
+                left = rf"\rbTitle{{{title}}}" if title else ""
+                if alongside and company:
+                    left += (r"\enspace--\enspace{}" if left else "") + company
+                right = rf"\rbDate{{{date}}}" if date else ""
+                if alongside and location:
+                    right = rf"\rbLocation{{{location}}}" + (r"\rbInlineSep" + right if right else "")
+                if left or right:
+                    out.append(rf"\rbEntryHead{{{left}}}{{{right}}}")
+                secondary = company if not alongside and company else (rf"\rbSubtitle{{{subtitle}}}" if subtitle else "")
+                sublocation = rf"\rbLocation{{{location}}}" if not alongside and location else ""
+                if secondary or sublocation:
+                    out.append(rf"\rbEntrySub{{{secondary}}}{{{sublocation}}}")
+                if not alongside and company and subtitle:
+                    out.append(rf"\rbEntrySub{{\rbSubtitle{{{subtitle}}}}}{{}}")
+            elif self.L["entry"]["layout"] == "oneLine":
                 left = rf"\rbTitle{{{title}}}" if title else ""
                 if subtitle:
                     left += (r"\rbInlineSep" if left else "") + rf"\rbSubtitle{{{subtitle}}}"
@@ -878,6 +991,8 @@ class _Writer:
                     out.append(rf"\rbEntryHead{{\rbTitle{{{title}}}}}{{\rbDate{{{date}}}}}")
                 if subtitle or location:
                     out.append(rf"\rbEntrySub{{\rbSubtitle{{{subtitle}}}}}{{\rbLocation{{{location}}}}}")
+            if section["type"] == "education" and entry["courses"].strip():
+                out.append(rf"\rbEntryDesc{{\textbf{{Courses:}} {self.paragraphs(entry['courses'])}}}")
             if entry["description"].strip():
                 out.append(rf"\rbEntryDesc{{{self.paragraphs(entry['description'])}}}")
             out += self.bullets(entry["bullets"])
@@ -888,8 +1003,14 @@ class _Writer:
         return out
 
     def skills(self, section: dict) -> list[str]:
-        suffix = escape(self.L["skills"]["labelSuffix"])
+        style = section["style"]
+        suffix = escape(style.get("labelSuffix", self.L["skills"]["labelSuffix"]))
         out = []
+        if "skillsLayout" in style:
+            out.append(self.skill_row_macro(style["skillsLayout"], renew=True))
+        if "labelBold" in style:
+            weight = r"\bfseries " if style["labelBold"] else r"\mdseries "
+            out.append(r"\renewcommand{\rbSkillLabel}[1]{{" + weight + "#1}}")
         for index, row in enumerate(section["rows"]):
             if index:
                 out.append(r"\vspace{\rbSkillRowGap}")

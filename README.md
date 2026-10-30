@@ -26,7 +26,7 @@ browser libraries are bundled in `static/vendor/`.
 
 The generated documents use these LaTeX packages: `geometry`, `fontspec`
 (XeLaTeX only), `xcolor`, `hyperref`, `microtype`, `multicol`, `ragged2e`,
-`graphicx`, `fix-cm` and `lm`. If your TeX install is missing one, install it
+`graphicx`, `ulem`, `fix-cm` and `lm`. If your TeX install is missing one, install it
 with `sudo tlmgr install <package>`.
 
 This tool was tested on macOS with BasicTeX 2024 and Python 3.9 and 3.11.
@@ -75,14 +75,26 @@ The left side has three tabs. The right side is the live PDF preview.
   - *List* for bullets, inline items or columns
   - *Raw LaTeX* for anything custom
 - Each section can be moved, hidden from the PDF, duplicated or deleted.
+- **Project subsections:** use **Add subsection** in an entry-based section,
+  name it (for example, “Processor Design (CPU)”), and drag entries by their
+  grip into it. Drag between entries to reorder, or use the Subsection dropdown
+  inside an entry. Subsection headings appear in the PDF using the section's
+  heading color. Removing a subsection keeps its entries under Ungrouped.
+  Drag a subsection's own grip, or use its up/down arrows, to reorder entire
+  subsections and the Ungrouped block. The PDF follows the same order.
+- Switching section type carries compatible content and settings into a blank
+  form. Existing entries keep their fields and settings; missing entries are
+  carried over into blank rows or appended. Other populated forms are restored
+  unchanged. Section titles stay independent of the selected type.
 - **Bullets:** press `Enter` to split a bullet, and `Backspace` in an empty
-  bullet to remove it.
+  bullet to remove it. Select text and use **B**, **I**, **U**, or
+  `⌘/Ctrl+B`, `⌘/Ctrl+I`, `⌘/Ctrl+U` to toggle bold, italic, or underline.
 - **Per-section and per-entry overrides:** open "Section spacing & layout"
   on a section, or "Fine-tune this entry" on an entry. Empty fields inherit
   the Design tab value, which is shown in grey. Negative values tighten
   spacing.
 
-Text fields support a little formatting: `**bold**`, `*italic*`,
+Text fields support a little formatting: `**bold**`, `*italic*`, `__underline__`,
 `` `code` ``, `[label](https://link)`, and `--` for an en dash (–).
 
 ### Design tab

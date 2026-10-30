@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 
-SECTION_TYPES = ("entries", "skills", "text", "list", "raw")
+SECTION_TYPES = ("education", "work", "entries", "skills", "text", "list", "raw")
 
 DEFAULT_LAYOUT = {
     "page": {
