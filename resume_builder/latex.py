@@ -953,9 +953,7 @@ class _Writer:
             if entry["url"].strip() and title:
                 title = self.href(normalize_url(entry["url"]), title)
             subtitle = self.text(entry["subtitle"])
-            if section["type"] == "education":
-                degree = self.text(entry["degree"])
-                subtitle = r"\enspace\textperiodcentered\enspace{}".join(part for part in (degree, subtitle) if part)
+            degree = self.text(entry["degree"]) if section["type"] == "education" else ""
             date = self.text(entry["date"])
             location = self.text(entry["location"])
 
@@ -977,6 +975,28 @@ class _Writer:
                     out.append(rf"\rbEntrySub{{{secondary}}}{{{sublocation}}}")
                 if not alongside and company and subtitle:
                     out.append(rf"\rbEntrySub{{\rbSubtitle{{{subtitle}}}}}{{}}")
+            elif section["type"] == "education":
+                # Degree on the left, GPA/honors (subtitle) on the right.
+                if self.L["entry"]["layout"] == "oneLine":
+                    left = rf"\rbTitle{{{title}}}" if title else ""
+                    if degree:
+                        left += (r"\rbInlineSep" if left else "") + rf"\rbSubtitle{{{degree}}}"
+                    right = rf"\rbSubtitle{{{subtitle}}}" if subtitle else ""
+                    if location:
+                        right += (r"\rbInlineSep" if right else "") + rf"\rbLocation{{{location}}}"
+                    if date:
+                        right += (r"\rbInlineSep" if right else "") + rf"\rbDate{{{date}}}"
+                    if left or right:
+                        out.append(rf"\rbEntryHead{{{left}}}{{{right}}}")
+                else:
+                    if title or date:
+                        out.append(rf"\rbEntryHead{{\rbTitle{{{title}}}}}{{\rbDate{{{date}}}}}")
+                    left = rf"\rbSubtitle{{{degree}}}" if degree else ""
+                    right = rf"\rbSubtitle{{{subtitle}}}" if subtitle else ""
+                    if location:
+                        right += (r"\rbInlineSep" if right else "") + rf"\rbLocation{{{location}}}"
+                    if left or right:
+                        out.append(rf"\rbEntrySub{{{left}}}{{{right}}}")
             elif self.L["entry"]["layout"] == "oneLine":
                 left = rf"\rbTitle{{{title}}}" if title else ""
                 if subtitle:
