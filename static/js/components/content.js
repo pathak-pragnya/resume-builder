@@ -606,7 +606,11 @@ function EntryCard({ entry, index, total, section, layout, update, onDragStart, 
               ${education ? html`<${Field} label="Degree name"><${TextInput} value=${entry.degree} onChange=${setField('degree')} placeholder="e.g. B.S. in Computer Engineering" /><//>` : null}
               ${!education ? html`<${Field} label="Subtitle"><${TextInput} value=${entry.subtitle} onChange=${setField('subtitle')} placeholder=${work ? 'Team / department (optional)' : 'Company / organization'} /><//>` : null}
               <${Field} label="Location"><${TextInput} value=${entry.location} onChange=${setField('location')} placeholder="City, ST" /><//>
-              ${education ? html`<${Field} label="Subtitle" wide><${TextInput} value=${entry.subtitle} onChange=${setField('subtitle')} placeholder="e.g. Honors, GPA, specialization (optional)" /><//>` : null}
+              ${education ? html`
+                <${Field} label="GPA / honors" wide hint="Shown on the right of the degree line in the PDF.">
+                  <${TextInput} value=${entry.subtitle} onChange=${setField('subtitle')} placeholder="e.g. 9.32/10, Honors, specialization (optional)" />
+                <//>
+              ` : null}
               ${education ? html`<${Field} label="Courses" wide hint="Optional coursework shown below your degree in the PDF.">
                 <${AutoTextarea} value=${entry.courses} onChange=${setField('courses')} placeholder="e.g. Computer Architecture, Operating Systems, VLSI Design" />
               <//>` : null}
